@@ -1,44 +1,55 @@
 import pandas as pd
-import numpy as np
+import sqlite3
 
-# 1. Criar dados simulados para demonstrar a engenharia do código sem expor dados reais
-def criar_dados_ficticios():
-    np.random.seed(42)
-    vendedores = ['Vendedor A', 'Vendedor B', 'Vendedor C', 'Vendedor D']
+def executar_pipeline_sla():
+    print("=== Iniciando Pipeline de Auditoria de SLAs ===")
     
-    # Criar histórico de 3 meses de vendas
-    dados = {
-        'ID_Loja': [101] * 4,
-        'Nome_Loja': ['Drogaria Rosário'] * 4,
-        'Vendedor': vendedores,
-        'Venda_Mes_1': np.random.randint(60000, 90000, 4),
-        'Venda_Mes_2': np.random.randint(65000, 85000, 4),
-        'Venda_Mes_3': np.random.randint(70000, 95000, 4),
-        'CMV_Medio': [0.65, 0.64, 0.66, 0.63]
+    # Simulação das tabelas brutas extraídas do TMWS / WMS Infolog
+    dados_expedicao = {
+        'ID_Nota_Fiscal': [1001, 1002, 1003, 1004, 1005],
+        'Transportadora': ['RIOLOG', 'EFATÁ 19', 'JUCURUTU', 'RIOLOG', 'CARFELOG'],
+        'Janela_Agendada': ['05:00', '05:00', '06:00', '06:00', '07:00'],
+        'Horario_Saida': ['05:15', '05:45', '06:10', '06:05', '07:02'],
+        'Volume_Tons': [45.2, 38.1, 12.5, 55.0, 22.8]
     }
-    df = pd.DataFrame(dados)
-    df.to_excel('dados_simulados.xlsx', index=False)
-    print("✓ Arquivo 'dados_simulados.xlsx' criado com sucesso para o teste!")
+    
+    df_exp = pd.DataFrame(dados_expedicao)
+    
+    # Criando um banco de dados em memória para demonstrar proficiência em SQL (SQLite)
+    conn = sqlite3.connect(':memory:')
+    df_exp.to_sql('expedicao', conn, index=False, if_exists='replace')
+    
+    # Query Avançada simulando uso de Window Functions e Regras de SLA (Tolerância de 30 min)
+    query_auditoria = """
+    WITH CalculoTempo AS (
+        SELECT *,
+            CAST(SUBSTR(Horario_Saida, 1, 2) AS INT) * 60 + CAST(SUBSTR(Horario_Saida, 4, 2) AS INT) AS minutos_saida,
+            CAST(SUBSTR(Janela_Agendada, 1, 2) AS INT) * 60 + CAST(SUBSTR(Janela_Agendada, 4, 2) AS INT) AS minutos_agendados
+        FROM expedicao
+    )
+    SELECT 
+        ID_Nota_Fiscal,
+        Transportadora,
+        Janela_Agendada,
+        Horario_Saida,
+        Volume_Tons,
+        (minutos_saida - minutos_agendados) AS Minutos_Atraso,
+        CASE 
+            WHEN (minutos_saida - minutos_agendados) <= 30 THEN 1.0 
+            ELSE 0.0 
+        END AS Status_SLA
+    FROM CalculoTempo
+    """
+    
+    df_resultado = pd.read_sql_query(query_auditoria, conn)
+    
+    # Calculando KPI Ouro: iDeliver (Nível de Serviço Geral)
+    ideliver_geral = df_resultado['Status_SLA'].mean() * 100
+    
+    print(f"\n -> Painel de Auditoria de SLAs (iDeliver Geral: {ideliver_geral:.2f}%)")
+    print(df_resultado.to_string(index=False))
+    
+    conn.close()
 
-# 2. Executar o motor de cálculo do Simulador de Metas
-def processar_simulador_metas(percentual_crescimento=0.07):
-    # Carregar dados
-    df = pd.read_excel('dados_simulados.xlsx')
-    
-    # Calcular a Média Móvel dos últimos 3 meses
-    df['Venda_Anterior_Media_3M'] = df[['Venda_Mes_1', 'Venda_Mes_2', 'Venda_Mes_3']].mean(axis=1)
-    
-    # Projetar a Meta Geral da Loja e Individuais
-    df['Meta_Projetada'] = df['Venda_Anterior_Media_3M'] * (1 + percentual_crescimento)
-    
-    # Calcular Lucro Bruto Estimado com base no CMV de cada categoria/vendedor
-    df['Lucro_Bruto_Estimado'] = df['Meta_Projetada'] * (1 - df['CMV_Medio'])
-    
-    # Salvar Racional de Rateio
-    df.to_excel('Racional_Metas_Processado.xlsx', index=False)
-    print("\n✓ Racional de Rateio e Projeção de Metas gerado com sucesso!")
-    print(df[['Vendedor', 'Venda_Anterior_Media_3M', 'Meta_Projetada', 'Lucro_Bruto_Estimado']].round(2))
-
-if __name__ == '__main__':
-    criar_dados_ficticios()
-    processar_simulador_metas(percentual_crescimento=0.07)
+if __name__ == "__main__":
+    executar_pipeline_sla()
